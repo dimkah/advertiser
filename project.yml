@@ -1,0 +1,19 @@
+parameters: {}
+environment: {}
+packages:
+    - name: monitor
+      shared: false
+      environment: {}
+      parameters: {}
+      annotations: {}
+      functions:
+        - name: start
+          binary: false
+          main: ""
+          runtime: go:default
+          web: true
+          webSecure: false
+          parameters: {}
+          environment: {}
+          annotations: {}
+          limits: {}
