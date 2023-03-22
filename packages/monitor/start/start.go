@@ -25,12 +25,8 @@ func Main(args map[string]interface{}) map[string]interface{} {
 
 	perform()
 
-	name, ok := args["name"].(string)
-	if !ok {
-		name = "stranger"
-	}
 	msg := make(map[string]interface{})
-	msg["body"] = "cvcvcvc " + name + "!"
+	msg["body"] = "ok"
 	return msg
 }
 
