@@ -4,12 +4,19 @@
 
 # **How its work?**
 
-Adevertiser is a simple app that running on "DO Function" and runc evry 3 hours. (Other cloud services can be used).
+**Function** - monitor/start
 
-Each run, the app fetch all saved bundle ids from removete database. (Firebase firestore)
+Is a simple app that running on "DO Function" and runc evry 3 hours. (Other cloud services can be used).
+
+The app fetch all saved bundle ids from removete database. (Firebase firestore)
 
 Then, the app fetch the app store page of each bundle id and check if there is a current version is the same as the last version in the database.
 If there is a new version, the app send a notification to subscribers using Telegram REST API.
+
+**Function** - monitor/subscriber
+
+Is a simple implementation of telegram webhook listener.
+Used to add or remove subscribers from the database.
 
 # **How to use?**
 
@@ -17,7 +24,9 @@ Service runs automatically every 3 hours.
 
 Too add a new bundle id, you need to add it to the database manualy.
 
-Too add a new subscriber, you need to add it to the database manualy.
+Too manage subsctibers, you need to add telegram bot **@cropwiseappsbot** to your chat and send ``` /subscribe ``` command, to subscribe to the notifications.
+
+Send ``` /unsubscribe ``` command, to unsubscribe from the notifications.
 
 # **Technologies stack:**
 
