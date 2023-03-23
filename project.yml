@@ -17,3 +17,13 @@ packages:
           environment: {}
           annotations: {}
           limits: {}
+        - name: subscriber
+          binary: false
+          main: ""
+          runtime: go:default
+          web: true
+          webSecure: false
+          parameters: {}
+          environment: {}
+          annotations: {}
+          limits: {}
