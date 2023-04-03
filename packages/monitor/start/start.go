@@ -56,7 +56,7 @@ func perform() {
 			fmt.Println("New version: " + appInfo.Version + " for " + appInfo.Name)
 			needNotify = true
 		} else {
-			fmt.Println("No new version for " + appInfo.Name)
+			fmt.Println("No new version for " + appInfo.Name + " (" + appInfo.Version + ")")
 			needNotify = false
 		}
 
@@ -128,9 +128,16 @@ func getAppInfo(app string) AppInfo {
 
 	url := itcURL + app
 
-	resp, errR := http.Get(url)
-	if errR != nil {
-		panic(errR)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	req.Header.Set("Cache-Control", "no-cache")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	client := &http.Client{}
+	resp, errR := client.Do(req)
+	if err != nil {
+		log.Fatal(errR)
 	}
 	defer resp.Body.Close()
 
