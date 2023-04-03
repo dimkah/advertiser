@@ -41,6 +41,8 @@ TLGRM_BOT_TOKEN - *is a token of your telegram bot*
 
 GCP_CREDS_JSON_BASE64 - *is a base64 encoded json file of your google cloud service account*
 
+*(pay attention, we have to **set environment variables each time after deploy**, since DO reset it after each deploy)*
+
 **How to deploy?**
 
 For now we are using **"DO Function"** to run the app.
