@@ -12,8 +12,11 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 
+	"github.com/Masterminds/semver"
 	"golang.org/x/oauth2/google"
 )
 
@@ -43,21 +46,42 @@ func perform() {
 	log.Println(versions)
 
 	for _, app := range apps {
-		fmt.Println("------------ Checking app: " + app)
+
+		fmt.Println("\n------------ Checking app: " + app + " ------------")
 
 		appInfo := getAppInfo(app)
 		bundleIdString := appInfo.bundleIdString()
 
 		var needNotify = true
 
-		fmt.Println("Latest version: ", versions[bundleIdString])
+		currentAppVersion := appInfo.Version
+		savedAppVersion := versions[bundleIdString].(string)
 
-		if appInfo.Version != versions[bundleIdString] {
-			fmt.Println("New version: " + appInfo.Version + " for " + appInfo.Name)
-			needNotify = true
-		} else {
-			fmt.Println("No new version for " + appInfo.Name + " (" + appInfo.Version + ")")
+		semverCurrentAppVersion, err := semver.NewVersion(currentAppVersion)
+		if err != nil {
+			fmt.Println("Invalid version string: " + currentAppVersion)
+			return
+		}
+
+		semverSavedAppVersion, err := semver.NewVersion(savedAppVersion)
+		if err != nil {
+			fmt.Println("Invalid version string: " + savedAppVersion)
+			return
+		}
+
+		fmt.Println("App name: " + appInfo.Name)
+		fmt.Println("Current version (ITC): " + appInfo.Version)
+		fmt.Println("Saved version (Firebase): " + savedAppVersion)
+
+		if semverCurrentAppVersion.LessThan(semverSavedAppVersion) {
 			needNotify = false
+			fmt.Printf("%s is less than %s\n", semverCurrentAppVersion, semverSavedAppVersion)
+		} else if semverCurrentAppVersion.GreaterThan(semverSavedAppVersion) {
+			needNotify = true
+			fmt.Printf("%s is greater than %s\n", semverCurrentAppVersion, semverSavedAppVersion)
+		} else {
+			needNotify = false
+			fmt.Printf("%s is equal to %s\n", semverCurrentAppVersion, semverSavedAppVersion)
 		}
 
 		if needNotify {
@@ -105,8 +129,7 @@ func sendToTelegram(message string, chatId string, botToken string) {
 }
 
 // Fetch app info
-
-var itcURL = "https://itunes.apple.com/lookup?bundleId=" // com.xxx.xx  &country=ua"
+var itcURL = "https://itunes.apple.com/lookup" // /? &bundleId=com.xxx.xx  &country=ua"
 
 type AppInfo struct {
 	Name         string `json:"trackName"` //"trackName":"Cropwise Operations"
@@ -126,10 +149,20 @@ type Result struct {
 
 func getAppInfo(app string) AppInfo {
 
-	url := itcURL + app
+	// Construct the URL with query parameters
+	url, err := url.Parse(itcURL)
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	req, err := http.NewRequest(http.MethodGet, url, nil)
-	req.Header.Set("Cache-Control", "no-cache")
+	query := url.Query()
+	query.Set("bundleId", app)
+	query.Set("t", strconv.FormatInt(time.Now().Unix(), 10)) // add current time in seconds since the epoch to avoid caching
+	// query.Set("country", "ua") // - not working for some reason, returns US version
+	url.RawQuery = query.Encode()
+
+	req, err := http.NewRequest(http.MethodGet, url.String(), nil)
+	req.Header.Set("Cache-Control", "private, no-cache, no-store, no-transform, must-revalidate, max-age=0")
 	if err != nil {
 		log.Fatal(err)
 	}
