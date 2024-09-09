@@ -49,7 +49,14 @@ func perform() {
 
 		fmt.Println("\n------------ Checking app: " + app + " ------------")
 
-		appInfo := getAppInfo(app)
+		appInfo, err := getAppInfo(app)
+		if err != nil {
+			log.Println("Error getting app info:", err)
+			return
+		} else {
+			fmt.Println("App info:", appInfo)
+		}
+
 		bundleIdString := appInfo.bundleIdString()
 
 		var needNotify = true
@@ -97,7 +104,10 @@ func perform() {
 
 func notify(appInfo AppInfo, subscribers []string) {
 
-	msg := appInfo.Name + ", version: " + appInfo.Version + "\n" + appInfo.ReleaseNotes
+	// Доступне оновлення, *Telematics Cropwise Operations* (iOS), 
+	// версія *1.11.0*:
+
+	msg := "Доступне оновлення (iOS),\n" + "*" + appInfo.Name + "*" + ", версія " + "*" + appInfo.Version + "*" + ":\n" + appInfo.ReleaseNotes
 
 	for _, subscriber := range subscribers {
 		sendToTelegram(msg, subscriber, os.Getenv("TLGRM_BOT_TOKEN"))
@@ -112,7 +122,7 @@ func sendToTelegram(message string, chatId string, botToken string) {
 
 	fmt.Println("Sending message to telegram: " + message)
 
-	tlgMsgUrl := "https://api.telegram.org/" + botToken + "/sendMessage?chat_id=" + chatId + "&text=" + encodeParam(message)
+	tlgMsgUrl := "https://api.telegram.org/bot" + botToken + "/sendMessage?chat_id=" + chatId + "&text=" + encodeParam(message) + "&parse_mode=Markdown"
 
 	respTlgr, errTlgr := http.Get(tlgMsgUrl)
 	if errTlgr != nil {
@@ -147,48 +157,55 @@ type Result struct {
 	Results []AppInfo `json:"results"`
 }
 
-func getAppInfo(app string) AppInfo {
+func getAppInfo(app string) (AppInfo, error) {
 
 	// Construct the URL with query parameters
 	url, err := url.Parse(itcURL)
 	if err != nil {
-		log.Fatal(err)
+		return AppInfo{}, fmt.Errorf("failed to parse URL: %w", err)
 	}
 
 	query := url.Query()
 	query.Set("bundleId", app)
 	query.Set("t", strconv.FormatInt(time.Now().Unix(), 10)) // add current time in seconds since the epoch to avoid caching
-	// query.Set("country", "ua") // - not working for some reason, returns US version
+	query.Set("country", "UA")
+	query.Set("lang", "uk")
 	url.RawQuery = query.Encode()
 
 	req, err := http.NewRequest(http.MethodGet, url.String(), nil)
-	req.Header.Set("Cache-Control", "private, no-cache, no-store, no-transform, must-revalidate, max-age=0")
 	if err != nil {
-		log.Fatal(err)
+		return AppInfo{}, fmt.Errorf("failed to create request: %w", err)
 	}
-
+	req.Header.Set("Cache-Control", "private, no-cache, no-store, no-transform, must-revalidate, max-age=0")
+	
 	client := &http.Client{}
-	resp, errR := client.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
-		log.Fatal(errR)
+		return AppInfo{}, fmt.Errorf("request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
+	// Перевірка статусного коду відповіді
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return AppInfo{}, fmt.Errorf("received non-200 response: %d, body: %s", resp.StatusCode, string(bodyBytes))
+	}
+
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		fmt.Println(err)
+		return AppInfo{}, fmt.Errorf("failed to read response body: %w", err)
 	}
 	resultString := string(bodyBytes)
 
 	var data *Result = &Result{}
 	errj := json.Unmarshal([]byte(resultString), data)
 	if errj != nil {
-		fmt.Println(errj.Error())
+		return AppInfo{}, fmt.Errorf("failed to Unmarshal result string: %w", errj)
 	}
 
 	appInfo := data.Results[0]
 
-	return appInfo
+	return appInfo, nil
 }
 
 // Firestore data access

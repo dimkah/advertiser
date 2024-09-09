@@ -37,9 +37,9 @@ Send ``` /unsubscribe ``` command, to unsubscribe from the notifications.
 
 **Requered environment variables:**
 
-TLGRM_BOT_TOKEN - *is a token of your telegram bot*
-
-GCP_CREDS_JSON_BASE64 - *is a base64 encoded json file of your google cloud service account*
+TLGRM_BOT_TOKEN - *is a token of your telegram bot* *(Coould 
+be obtained from BotFather)*
+GCP_CREDS_JSON_BASE64 - *is a base64 encoded json file of your google cloud service account* *(Could be obtained from Fierbase console)*
 
 *(pay attention, we have to **set environment variables each time after deploy**, since DO reset it after each deploy)*
 
