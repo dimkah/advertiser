@@ -6,12 +6,14 @@
 
 **Function** - monitor/start
 
-Is a simple app that running on "DO Function" and runc evry 3 hours. (Other cloud services can be used).
+Is a simple app that running on "DO Function" and runc evry 2 hours. (Other cloud services can be used).
 
 The app fetch all saved bundle ids from removete database. (Firebase firestore)
 
 Then, the app fetch the app store page of each bundle id and check if there is a current version is the same as the last version in the database.
 If there is a new version, the app send a notification to subscribers using Telegram REST API.
+
+*For now, we are fetching Ukranian app store page localisation.*
 
 **Function** - monitor/subscriber
 
