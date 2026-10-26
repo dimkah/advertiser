@@ -6,8 +6,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
@@ -34,114 +34,107 @@ func Main(args map[string]interface{}) map[string]interface{} {
 }
 
 func perform() {
-
 	token := setupFirestore()
-
-	apps := getApps(token)
-	versions := getVersions(token)
 	subscribers := getSubscribers(token)
 
-	log.Println(apps)
-	log.Println(subscribers)
-	log.Println(versions)
+	monitorApps(token, getApps(token, appsPath), getVersions(token, versionsPath), versionsPath, subscribers, getAppInfo)
+	monitorApps(token, getApps(token, androidAppsPath), getVersions(token, androidVersionsPath), androidVersionsPath, subscribers, getAndroidAppInfo)
+}
 
+func monitorApps(token string, apps []string, versions map[string]interface{}, path string, subscribers []string, fetch func(string) (AppInfo, error)) {
 	for _, app := range apps {
-
-		fmt.Println("\n------------ Checking app: " + app + " ------------")
-
-		appInfo, err := getAppInfo(app)
+		appInfo, err := fetch(app)
 		if err != nil {
-			log.Println("Error getting app info:", err)
-			return
-		} else {
-			fmt.Println("App info:", appInfo)
+			log.Printf("Error checking %s: %v", app, err)
+			continue
 		}
 
-		bundleIdString := appInfo.bundleIdString()
-
-		var needNotify = true
-
-		currentAppVersion := appInfo.Version
-		savedAppVersion := versions[bundleIdString].(string)
-
-		semverCurrentAppVersion, err := semver.NewVersion(currentAppVersion)
+		current, err := semver.NewVersion(appInfo.Version)
 		if err != nil {
-			fmt.Println("Invalid version string: " + currentAppVersion)
-			return
+			log.Printf("Invalid store version for %s: %q", app, appInfo.Version)
+			continue
 		}
 
-		semverSavedAppVersion, err := semver.NewVersion(savedAppVersion)
+		key := appInfo.bundleIdString()
+		savedValue, exists := versions[key]
+		if !exists || savedValue == nil {
+			// Establish a baseline for newly monitored apps without announcing an old release.
+			if err := updateAppInfo(token, path, appInfo); err != nil {
+				log.Printf("Error saving baseline for %s: %v", app, err)
+			}
+			continue
+		}
+
+		savedVersion, ok := savedValue.(string)
+		if !ok {
+			log.Printf("Invalid saved version for %s", app)
+			continue
+		}
+		saved, err := semver.NewVersion(savedVersion)
 		if err != nil {
-			fmt.Println("Invalid version string: " + savedAppVersion)
-			return
+			log.Printf("Invalid saved version for %s: %q", app, savedVersion)
+			continue
 		}
-
-		fmt.Println("App name: " + appInfo.Name)
-		fmt.Println("Current version (ITC): " + appInfo.Version)
-		fmt.Println("Saved version (Firebase): " + savedAppVersion)
-
-		if semverCurrentAppVersion.LessThan(semverSavedAppVersion) {
-			needNotify = false
-			fmt.Printf("%s is less than %s\n", semverCurrentAppVersion, semverSavedAppVersion)
-		} else if semverCurrentAppVersion.GreaterThan(semverSavedAppVersion) {
-			needNotify = true
-			fmt.Printf("%s is greater than %s\n", semverCurrentAppVersion, semverSavedAppVersion)
-		} else {
-			needNotify = false
-			fmt.Printf("%s is equal to %s\n", semverCurrentAppVersion, semverSavedAppVersion)
+		if !current.GreaterThan(saved) {
+			continue
 		}
-
-		if needNotify {
-			updateAppInfo(token, appInfo)
-			notify(appInfo, subscribers)
-		} else {
-			fmt.Println("No need to notify and update")
+		// Record the release before sending, so a failed recipient does not
+		// cause the same release to be sent to every chat on the next run.
+		if err := updateAppInfo(token, path, appInfo); err != nil {
+			log.Printf("Error saving version for %s: %v", app, err)
+			continue
+		}
+		if err := notify(appInfo, subscribers); err != nil {
+			log.Printf("Error notifying about %s: %v", app, err)
 		}
 	}
 }
 
 // Notify about app release
 
-func notify(appInfo AppInfo, subscribers []string) {
-
-	// Доступне оновлення, *Telematics Cropwise Operations* (iOS), 
-	// версія *1.11.0*:
-
-	msg := "Доступне оновлення (iOS),\n" + "*" + appInfo.Name + "*" + ", версія " + "*" + appInfo.Version + "*" + ":\n" + appInfo.ReleaseNotes
-
+func notify(appInfo AppInfo, subscribers []string) error {
+	msg := fmt.Sprintf("Доступне оновлення (%s),\n<b>%s</b>, версія <b>%s</b>:\n%s",
+		html.EscapeString(appInfo.Platform), html.EscapeString(appInfo.Name),
+		html.EscapeString(appInfo.Version), html.EscapeString(appInfo.ReleaseNotes))
+	var lastError error
 	for _, subscriber := range subscribers {
-		sendToTelegram(msg, subscriber, os.Getenv("TLGRM_BOT_TOKEN"))
+		if err := sendToTelegram(msg, subscriber, os.Getenv("TLGRM_BOT_TOKEN")); err != nil {
+			lastError = err
+		}
 	}
+	return lastError
 }
 
-func encodeParam(s string) string {
-	return url.QueryEscape(s)
-}
+var telegramURL = "https://api.telegram.org"
+var httpClient = &http.Client{Timeout: 20 * time.Second}
 
-func sendToTelegram(message string, chatId string, botToken string) {
-
-	fmt.Println("Sending message to telegram: " + message)
-
-	tlgMsgUrl := "https://api.telegram.org/bot" + botToken + "/sendMessage?chat_id=" + chatId + "&text=" + encodeParam(message) + "&parse_mode=Markdown"
-
-	respTlgr, errTlgr := http.Get(tlgMsgUrl)
-	if errTlgr != nil {
-		panic(errTlgr)
-	}
-	defer respTlgr.Body.Close()
-
-	bodyBytesTlgr, err := ioutil.ReadAll(respTlgr.Body)
+func sendToTelegram(message string, chatId string, botToken string) error {
+	endpoint := telegramURL + "/bot" + botToken + "/sendMessage"
+	resp, err := httpClient.PostForm(endpoint, url.Values{
+		"chat_id": {chatId}, "text": {message}, "parse_mode": {"HTML"},
+	})
 	if err != nil {
-		fmt.Println(err)
+		// net/http errors contain the request URL, including the bot token.
+		return fmt.Errorf("Telegram request failed for chat %s", chatId)
 	}
-
-	fmt.Println("Telegram respoinse: ", string(bodyBytesTlgr))
+	defer resp.Body.Close()
+	var result struct {
+		OK bool `json:"ok"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return fmt.Errorf("invalid Telegram response for chat %s", chatId)
+	}
+	if resp.StatusCode != http.StatusOK || !result.OK {
+		return fmt.Errorf("Telegram rejected message for chat %s (HTTP %d)", chatId, resp.StatusCode)
+	}
+	return nil
 }
 
 // Fetch app info
 var itcURL = "https://itunes.apple.com/lookup" // /? &bundleId=com.xxx.xx  &country=ua"
 
 type AppInfo struct {
+	Platform     string `json:"-"`
 	Name         string `json:"trackName"` //"trackName":"Cropwise Operations"
 	BundleId     string //"bundleId":"com.nst.cropio"
 	Version      string //"version":"4.11.1"
@@ -149,7 +142,7 @@ type AppInfo struct {
 }
 
 func (info AppInfo) bundleIdString() string {
-	// replace all dots with underscores to avoid problems with firestore
+	// Preserve the existing Firebase keys, which omit dots.
 	return strings.ReplaceAll(info.BundleId, ".", "")
 }
 
@@ -177,9 +170,8 @@ func getAppInfo(app string) (AppInfo, error) {
 		return AppInfo{}, fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Cache-Control", "private, no-cache, no-store, no-transform, must-revalidate, max-age=0")
-	
-	client := &http.Client{}
-	resp, err := client.Do(req)
+
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return AppInfo{}, fmt.Errorf("request failed: %w", err)
 	}
@@ -203,32 +195,36 @@ func getAppInfo(app string) (AppInfo, error) {
 		return AppInfo{}, fmt.Errorf("failed to Unmarshal result string: %w", errj)
 	}
 
+	if len(data.Results) == 0 {
+		return AppInfo{}, fmt.Errorf("app %s not found in the Ukrainian App Store", app)
+	}
 	appInfo := data.Results[0]
+	appInfo.Platform = "iOS"
 
 	return appInfo, nil
 }
 
 // Firestore data access
 
-var dbURL string = "https://cropiotest-default-rtdb.europe-west1.firebasedatabase.app"
+var dbURL = strings.TrimRight(strings.TrimSpace(os.Getenv("FIREBASE_DATABASE_URL")), "/")
 var appsPath string = "/apps"
 var subscribersPath string = "/subscribers"
 var versionsPath string = "/versions"
+var androidAppsPath = "/androidApps"
+var androidVersionsPath = "/androidVersions"
 
-func updateAppInfo(accessToken string, appInfo AppInfo) {
+func updateAppInfo(accessToken string, path string, appInfo AppInfo) error {
 
 	data := map[string]string{
 		appInfo.bundleIdString(): appInfo.Version,
 	}
 
-	result := put(dbURL, versionsPath, data, accessToken)
-
-	fmt.Println("updateAppInfo: ", result)
+	return put(dbURL, path, data, accessToken)
 }
 
-func getApps(accessToken string) []string {
+func getApps(accessToken string, path string) []string {
 
-	jsonString := get(dbURL, appsPath, accessToken)
+	jsonString := get(dbURL, path, accessToken)
 
 	var stringArray []string
 	err := json.Unmarshal([]byte(jsonString), &stringArray)
@@ -254,9 +250,9 @@ func getSubscribers(accessToken string) []string {
 	return stringArray
 }
 
-func getVersions(accessToken string) map[string]interface{} {
+func getVersions(accessToken string, path string) map[string]interface{} {
 
-	jsonString := get(dbURL, versionsPath, accessToken)
+	jsonString := get(dbURL, path, accessToken)
 
 	var versions map[string]interface{}
 	err := json.Unmarshal([]byte(jsonString), &versions)
@@ -287,52 +283,45 @@ func get(dbURL string, dataPath string, accessToken string) string {
 	return resultString
 }
 
-func put(dbURL string, dataPath string, data map[string]string, accessToken string) string {
+func put(dbURL string, dataPath string, data map[string]string, accessToken string) error {
 
 	url := dbURL + dataPath + ".json?access_token=" + accessToken
 
 	// marshal the data to JSON format
 	payload, err := json.Marshal(data)
 	if err != nil {
-		fmt.Println("error marshaling data:", err)
-		return ""
+		return err
 	}
 
 	req, err := http.NewRequest(http.MethodPatch, url, bytes.NewBuffer(payload))
-	req.Header.Set("Content-Type", "application/json")
 	if err != nil {
-		log.Fatal(err)
+		return fmt.Errorf("invalid Firebase request")
 	}
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := httpClient.Do(req)
 	if err != nil {
-		log.Fatal(err)
+		return fmt.Errorf("Firebase update failed for %s", dataPath)
 	}
 
 	defer resp.Body.Close()
 
-	// read the response body
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		fmt.Println("error reading Firestore API response body:", err)
-		return ""
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("Firebase update failed for %s (HTTP %d)", dataPath, resp.StatusCode)
 	}
-
-	resultString := string(respBody)
-
-	return resultString
+	return nil
 }
 
 // Fierstore connection and authorisation
 
 func setupFirestore() string {
+	if dbURL == "" {
+		panic("Set FIREBASE_DATABASE_URL")
+	}
 
 	ctx := context.Background()
 	serviceAccountJSON, _ := base64.StdEncoding.DecodeString(os.Getenv("GCP_CREDS_JSON_BASE64"))
-	firebaseProjectID := "cropiotest"
 
-	accessToken, err := generateAccessToken(ctx, firebaseProjectID, serviceAccountJSON)
+	accessToken, err := generateAccessToken(ctx, serviceAccountJSON)
 	if err != nil {
 		log.Println(err)
 	}
@@ -344,7 +333,7 @@ func setupFirestore() string {
 	return accessToken
 }
 
-func generateAccessToken(ctx context.Context, firebaseProjectID string, serviceAccountJSON []byte) (string, error) {
+func generateAccessToken(ctx context.Context, serviceAccountJSON []byte) (string, error) {
 
 	creds, err := google.CredentialsFromJSON(ctx, serviceAccountJSON, "https://www.googleapis.com/auth/userinfo.email", "https://www.googleapis.com/auth/firebase.database")
 	if err != nil {

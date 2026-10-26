@@ -1,9 +1,11 @@
 parameters: {}
-environment: {}
+environment:
+    TLGRM_BOT_TOKEN: "${TLGRM_BOT_TOKEN}"
+    GCP_CREDS_JSON_BASE64: "${GCP_CREDS_JSON_BASE64}"
+    FIREBASE_DATABASE_URL: "${FIREBASE_DATABASE_URL}"
 packages:
     - name: monitor
       shared: false
-      environment: {}
       parameters: {}
       annotations: {}
       functions:
@@ -14,7 +16,6 @@ packages:
           web: true
           webSecure: false
           parameters: {}
-          environment: {}
           annotations: {}
           limits: {}
         - name: subscriber
@@ -24,6 +25,5 @@ packages:
           web: true
           webSecure: false
           parameters: {}
-          environment: {}
           annotations: {}
           limits: {}

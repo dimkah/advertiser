@@ -150,7 +150,7 @@ func parseTelegramRequest(message string) (*Update, error) {
 
 // Firestore data access
 
-var dbURL string = "https://cropiotest-default-rtdb.europe-west1.firebasedatabase.app"
+var dbURL = strings.TrimRight(strings.TrimSpace(os.Getenv("FIREBASE_DATABASE_URL")), "/")
 var subscribersPath string = "/subscribers"
 
 func updateSubscribers(accessToken string, subscribers []string) {
@@ -233,12 +233,14 @@ func put(dbURL string, dataPath string, data []string, accessToken string) strin
 // Fierstore connection and authorisation
 
 func setupFirestore() string {
+	if dbURL == "" {
+		panic("Set FIREBASE_DATABASE_URL")
+	}
 
 	ctx := context.Background()
 	serviceAccountJSON, _ := base64.StdEncoding.DecodeString(os.Getenv("GCP_CREDS_JSON_BASE64"))
-	firebaseProjectID := "cropiotest"
 
-	accessToken, err := generateAccessToken(ctx, firebaseProjectID, serviceAccountJSON)
+	accessToken, err := generateAccessToken(ctx, serviceAccountJSON)
 	if err != nil {
 		log.Println(err)
 	}
@@ -250,7 +252,7 @@ func setupFirestore() string {
 	return accessToken
 }
 
-func generateAccessToken(ctx context.Context, firebaseProjectID string, serviceAccountJSON []byte) (string, error) {
+func generateAccessToken(ctx context.Context, serviceAccountJSON []byte) (string, error) {
 
 	creds, err := google.CredentialsFromJSON(ctx, serviceAccountJSON, "https://www.googleapis.com/auth/userinfo.email", "https://www.googleapis.com/auth/firebase.database")
 	if err != nil {
