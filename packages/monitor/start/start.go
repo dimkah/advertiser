@@ -237,17 +237,38 @@ func getApps(accessToken string, path string) []string {
 }
 
 func getSubscribers(accessToken string) []string {
-
-	jsonString := get(dbURL, subscribersPath, accessToken)
-
-	var stringArray []string
-	err := json.Unmarshal([]byte(jsonString), &stringArray)
+	subscribers, err := decodeSubscribers([]byte(get(dbURL, subscribersPath, accessToken)))
 	if err != nil {
-		fmt.Println("resultString: ", jsonString)
 		panic(err)
 	}
+	return subscribers
+}
 
-	return stringArray
+func decodeSubscribers(data []byte) ([]string, error) {
+	var values []json.RawMessage
+	if err := json.Unmarshal(data, &values); err != nil {
+		return nil, fmt.Errorf("invalid subscribers list: expected a JSON array")
+	}
+	if values == nil {
+		return nil, nil
+	}
+
+	subscribers := make([]string, len(values))
+	for i, value := range values {
+		if len(value) > 0 && value[0] == '"' {
+			if err := json.Unmarshal(value, &subscribers[i]); err != nil {
+				return nil, fmt.Errorf("invalid subscriber at index %d", i)
+			}
+			continue
+		}
+		// Firebase may store IDs as numbers. Keep their exact digits without
+		// passing through float64, which loses precision above 2^53.
+		if _, err := strconv.ParseInt(string(value), 10, 64); err != nil {
+			return nil, fmt.Errorf("invalid subscriber at index %d: expected a string or integer", i)
+		}
+		subscribers[i] = string(value)
+	}
+	return subscribers, nil
 }
 
 func getVersions(accessToken string, path string) map[string]interface{} {
